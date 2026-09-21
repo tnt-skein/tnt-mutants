@@ -998,6 +998,26 @@ recover_interrupted() {
 
 # ─── Замки ──────────────────────────────────────────────────────────────────
 
+# Жив ли прогон, поставивший замок.
+#
+# В замке лежит PID прогона, и живость проверяется по нему. Прежде она
+# проверялась по процессу анализатора, а его между файлами нет: пока прогон
+# генерирует мутантов или гоняет базу, ждущий сосед считал замок брошенным,
+# снимал его и шёл параллельно. Два прогона разом искажают время,
+# а мутант, убитый пределом, числится убитым — итог зелёный, ничего
+# не проверив. Замок старого вида, без PID, судится по-старому.
+lock_holder_alive() {
+    local holder
+    holder=$(head -n 1 "$1" 2>/dev/null || true)
+
+    if [[ "${holder}" =~ ^[0-9]+$ ]]; then
+        kill -0 "${holder}" 2>/dev/null
+        return
+    fi
+
+    pgrep -f analyze_mutants >/dev/null 2>&1
+}
+
 # Замок прогона.
 #
 # Во время прогона исходники подменены мутантами: правка файла в это время
@@ -1005,8 +1025,7 @@ recover_interrupted() {
 # по симптомам почти невозможно — тесты начинают падать там, где их никто
 # не трогал.
 if [ -e "${LOCK}" ]; then
-    # Замок без живого анализатора — тоже след обрыва, а не идущий прогон.
-    if pgrep -f analyze_mutants >/dev/null 2>&1; then
+    if lock_holder_alive "${LOCK}"; then
         echo "Мутационный прогон уже идёт (${LOCK}): исходники сейчас подменены мутантами." >&2
         echo 'Дождитесь его конца — правки файлов в это время теряются.' >&2
         exit 1
@@ -1024,13 +1043,12 @@ recover_interrupted
 waited=0
 
 while true; do
-    if (set -o noclobber; date > "${MACHINE_LOCK}") 2>/dev/null; then
+    if (set -o noclobber; echo "$$" > "${MACHINE_LOCK}") 2>/dev/null; then
         MACHINE_LOCK_HELD=1
         break
     fi
 
-    # Замок без живого анализатора — след обрыва, а не идущий прогон.
-    if ! pgrep -f analyze_mutants >/dev/null 2>&1; then
+    if ! lock_holder_alive "${MACHINE_LOCK}"; then
         echo "Замок машины ${MACHINE_LOCK} остался от прерванного прогона — снимаю." >&2
         rm -f "${MACHINE_LOCK}"
         continue
@@ -1050,7 +1068,7 @@ while true; do
 done
 
 mkdir -p "${WORKDIR}"
-date > "${LOCK}"
+echo "$$" > "${LOCK}"
 LOCK_HELD=1
 
 report_stale_paths "${IGNORE}" 'правило исключения'

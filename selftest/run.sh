@@ -36,7 +36,9 @@ fi
 
 # Живой прогон в этом каталоге держит замок, и каждый запуск утилиты ниже
 # отказал бы «прогон уже идёт» — самопроверка показала бы ложные поломки.
-if [ -e "${MUTANTS_WORK}/lock" ] && pgrep -f analyze_mutants >/dev/null 2>&1; then
+holder=$(head -n 1 "${MUTANTS_WORK}/lock" 2>/dev/null || true)
+
+if [[ "${holder}" =~ ^[0-9]+$ ]] && kill -0 "${holder}" 2>/dev/null; then
     echo "Мутационный прогон уже идёт (${MUTANTS_WORK}/lock): самопроверку запустите после него." >&2
     exit 1
 fi
